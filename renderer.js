@@ -1,216 +1,348 @@
+const complaintForm = document.getElementById("complaintForm");
+const studentNameInput = document.getElementById("studentName");
+const titleInput = document.getElementById("title");
+const categoryInput = document.getElementById("category");
+const dateInput = document.getElementById("date");
+const contactInput = document.getElementById("contactInfo");
+const descriptionInput = document.getElementById("description");
+
+const submitBtn = document.getElementById("submitBtn");
+const cancelEditBtn = document.getElementById("cancelEditBtn");
+const formHeading = document.getElementById("formHeading");
+const formMessage = document.getElementById("formMessage");
+
+const searchInput = document.getElementById("searchInput");
+const filterInput = document.getElementById("filterInput");
+
+const complaintList = document.getElementById("complaintList");
+const emptyState = document.getElementById("emptyState");
+
+const pendingCount = document.getElementById("pendingCount");
+const inProgressCount = document.getElementById("inProgressCount");
+const resolvedCount = document.getElementById("resolvedCount");
+const totalText = document.getElementById("totalText");
+
 let allComplaints = [];
 let editingId = null;
 
-const form = document.getElementById('complaint-form');
-const studentNameInput = document.getElementById('studentName');
-const titleInput = document.getElementById('title');
-const categoryInput = document.getElementById('category');
-const dateInput = document.getElementById('date');
-const contactInfoInput = document.getElementById('contactInfo');
-const descriptionInput = document.getElementById('description');
-const formStatus = document.getElementById('form-status');
-const submitBtn = document.getElementById('submit-btn');
-const cancelEditBtn = document.getElementById('cancel-edit-btn');
-const formHeading = document.getElementById('form-heading');
+document.addEventListener("DOMContentLoaded", () => {
+  dateInput.value = new Date().toISOString().split("T")[0];
+  loadComplaints();
+});
 
-const searchInput = document.getElementById('search');
-const filterInput = document.getElementById('filter');
-const listEl = document.getElementById('complaint-list');
-const emptyMessage = document.getElementById('empty-message');
+complaintForm.addEventListener("submit", handleFormSubmit);
+cancelEditBtn.addEventListener("click", resetForm);
+searchInput.addEventListener("input", renderComplaints);
+filterInput.addEventListener("change", renderComplaints);
 
-const countPending = document.getElementById('count-pending');
-const countInProgress = document.getElementById('count-in-progress');
-const countResolved = document.getElementById('count-resolved');
+async function loadComplaints() {
+  const result = await window.complaintAPI.getComplaints();
 
-function showStatus(message, isError = true) {
-  formStatus.textContent = message;
-  formStatus.className = 'form-status ' + (isError ? 'error' : 'success');
-  if (message) {
-    setTimeout(() => { formStatus.textContent = ''; formStatus.className = 'form-status'; }, 3000);
+  if (!result.success) {
+    showMessage("Could not load complaints.", "error");
+    return;
   }
+
+  allComplaints = result.complaints;
+  updateCounts(result.counts);
+  renderComplaints();
 }
 
-function updateCounts(counts) {
-  countPending.textContent = counts.pendingCount;
-  countInProgress.textContent = counts.inProgressCount;
-  countResolved.textContent = counts.resolvedCount;
-}
+async function handleFormSubmit(event) {
+  event.preventDefault();
 
-function statusLabel(status) {
-  if (status === 'in-progress') return 'In Progress';
-  if (status === 'resolved') return 'Resolved';
-  return 'Pending';
+  const studentName = studentNameInput.value.trim();
+  const title = titleInput.value.trim();
+  const category = categoryInput.value.trim();
+  const date = dateInput.value;
+  const contactInfo = contactInput.value.trim();
+  const description = descriptionInput.value.trim();
+
+  if (!studentName || !title || !contactInfo || !date || !category) {
+    showMessage("Please fill in all required fields.", "error");
+    return;
+  }
+
+  if (category.toLowerCase() === title.toLowerCase()) {
+    showMessage("Category can't be the same as the complaint title.", "error");
+    return;
+  }
+
+  const payload = {
+    studentName,
+    title,
+    category,
+    date,
+    contactInfo,
+    description
+  };
+
+  let result;
+
+  if (editingId) {
+    result = await window.complaintAPI.updateComplaint({
+      id: editingId,
+      ...payload
+    });
+  } else {
+    result = await window.complaintAPI.addComplaint(payload);
+  }
+
+  if (!result.success) {
+    showMessage(result.message || "Something went wrong.", "error");
+    return;
+  }
+
+  if (editingId) {
+    showMessage("Complaint updated successfully.", "success");
+  } else {
+    showMessage("Complaint submitted successfully.", "success");
+  }
+
+  await loadComplaints();
+  resetForm(false);
 }
 
 function renderComplaints() {
   const filterValue = filterInput.value;
   const query = searchInput.value.trim().toLowerCase();
 
-  let filtered = allComplaints;
-  if (filterValue !== 'all') {
-    filtered = filtered.filter((c) => c.status === filterValue);
+  let filtered = [...allComplaints];
+
+  if (filterValue !== "all") {
+    filtered = filtered.filter((complaint) => complaint.status === filterValue);
   }
+
   if (query) {
-    filtered = filtered.filter((c) =>
-      c.title.toLowerCase().includes(query) ||
-      c.studentName.toLowerCase().includes(query) ||
-      c.category.toLowerCase().includes(query)
+    filtered = filtered.filter((complaint) =>
+      complaint.title.toLowerCase().includes(query) ||
+      complaint.studentName.toLowerCase().includes(query) ||
+      complaint.category.toLowerCase().includes(query)
     );
   }
 
-  listEl.innerHTML = '';
-  emptyMessage.style.display = filtered.length === 0 ? 'block' : 'none';
+  filtered.sort((a, b) => b.createdAt - a.createdAt);
 
-  filtered
-    .slice()
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .forEach((c) => {
-      const li = document.createElement('li');
-      li.className = 'complaint-item status-' + c.status;
+  complaintList.innerHTML = "";
 
-      li.innerHTML = `
-        <div class="item-main">
-          <div class="item-top">
-            <span class="item-title">${escapeHtml(c.title)}</span>
-            <span class="status-badge ${c.status}">${statusLabel(c.status)}</span>
-          </div>
-          <div class="item-meta">
-            <span>${escapeHtml(c.studentName)}</span>
-            <span>${escapeHtml(c.category)}</span>
-            <span>${escapeHtml(c.date || '')}</span>
-            <span>${escapeHtml(c.contactInfo)}</span>
-          </div>
-          ${c.description ? `<p class="item-desc">${escapeHtml(c.description)}</p>` : ''}
-        </div>
-        <div class="item-actions">
-          <select class="status-select" data-id="${c.id}">
-            <option value="pending" ${c.status === 'pending' ? 'selected' : ''}>Pending</option>
-            <option value="in-progress" ${c.status === 'in-progress' ? 'selected' : ''}>In Progress</option>
-            <option value="resolved" ${c.status === 'resolved' ? 'selected' : ''}>Resolved</option>
-          </select>
-          <button class="edit-btn" data-id="${c.id}">Edit</button>
-          <button class="delete-btn" data-id="${c.id}">Delete</button>
-        </div>
-      `;
-      listEl.appendChild(li);
+  if (filtered.length === 0) {
+    emptyState.classList.remove("hidden");
+    emptyState.querySelector("h3").textContent =
+      allComplaints.length === 0 ? "No complaints yet" : "No matching complaints";
+    emptyState.querySelector("p").textContent =
+      allComplaints.length === 0
+        ? "Submit a complaint above to get started."
+        : "Try changing the search or status filter.";
+  } else {
+    emptyState.classList.add("hidden");
+
+    filtered.forEach((complaint) => {
+      complaintList.appendChild(createComplaintCard(complaint));
     });
+  }
 
-  document.querySelectorAll('.status-select').forEach((sel) => {
-    sel.addEventListener('change', async (e) => {
-      const id = e.target.dataset.id;
-      const result = await window.complaintAPI.setStatus(id, e.target.value);
-      if (result.success) {
-        const idx = allComplaints.findIndex((c) => c.id === id);
-        if (idx !== -1) allComplaints[idx] = result.complaint;
-        updateCounts(result.counts);
-        renderComplaints();
-      }
-    });
-  });
-
-  document.querySelectorAll('.edit-btn').forEach((btn) => {
-    btn.addEventListener('click', () => startEdit(btn.dataset.id));
-  });
-
-  document.querySelectorAll('.delete-btn').forEach((btn) => {
-    btn.addEventListener('click', () => deleteComplaint(btn.dataset.id));
-  });
+  totalText.textContent =
+    `${allComplaints.length} complaint${allComplaints.length === 1 ? "" : "s"}`;
 }
 
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+function createComplaintCard(complaint) {
+  const card = document.createElement("article");
+  card.className = "complaint-card";
+
+  const statusLabel = formatStatus(complaint.status);
+  const statusClass = complaint.status;
+
+  card.innerHTML = `
+    <div class="complaint-top">
+      <div>
+        <div class="title-row">
+          <h3>${escapeHtml(complaint.title)}</h3>
+          <span class="status-badge ${statusClass}">${statusLabel}</span>
+        </div>
+
+        <p class="student-name">
+          Submitted by <strong>${escapeHtml(complaint.studentName)}</strong>
+        </p>
+      </div>
+
+      <span class="category-badge">${escapeHtml(complaint.category)}</span>
+    </div>
+
+    <div class="complaint-meta">
+      <span>📅 ${formatDate(complaint.date)}</span>
+      <span>📞 ${escapeHtml(complaint.contactInfo)}</span>
+    </div>
+
+    ${
+      complaint.description
+        ? `<p class="description">${escapeHtml(complaint.description)}</p>`
+        : ""
+    }
+
+    <div class="complaint-actions">
+      <select class="status-select" data-id="${complaint.id}">
+        <option value="pending" ${complaint.status === "pending" ? "selected" : ""}>
+          Pending
+        </option>
+        <option value="in-progress" ${complaint.status === "in-progress" ? "selected" : ""}>
+          In Progress
+        </option>
+        <option value="resolved" ${complaint.status === "resolved" ? "selected" : ""}>
+          Resolved
+        </option>
+      </select>
+
+      <button class="btn btn-secondary edit-btn" data-id="${complaint.id}">
+        Edit
+      </button>
+
+      <button class="btn btn-danger delete-btn" data-id="${complaint.id}">
+        Delete
+      </button>
+    </div>
+  `;
+
+  const statusSelect = card.querySelector(".status-select");
+  const editButton = card.querySelector(".edit-btn");
+  const deleteButton = card.querySelector(".delete-btn");
+
+  statusSelect.addEventListener("change", async (event) => {
+    const result = await window.complaintAPI.setStatus(
+      complaint.id,
+      event.target.value
+    );
+
+    if (result.success) {
+      await loadComplaints();
+      showMessage("Complaint status updated.", "success");
+    } else {
+      showMessage(result.message || "Could not update status.", "error");
+    }
+  });
+
+  editButton.addEventListener("click", () => startEdit(complaint.id));
+
+  deleteButton.addEventListener("click", () => deleteComplaint(complaint.id));
+
+  return card;
 }
 
 function startEdit(id) {
-  const c = allComplaints.find((x) => x.id === id);
-  if (!c) return;
-  editingId = id;
-  studentNameInput.value = c.studentName;
-  titleInput.value = c.title;
-  categoryInput.value = c.category;
-  dateInput.value = c.date || '';
-  contactInfoInput.value = c.contactInfo;
-  descriptionInput.value = c.description || '';
+  const complaint = allComplaints.find((item) => item.id === id);
 
-  formHeading.textContent = 'Edit Complaint';
-  submitBtn.textContent = 'Save Changes';
-  cancelEditBtn.classList.remove('hidden');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (!complaint) {
+    return;
+  }
+
+  editingId = id;
+
+  studentNameInput.value = complaint.studentName;
+  titleInput.value = complaint.title;
+  categoryInput.value = complaint.category;
+  dateInput.value = complaint.date;
+  contactInput.value = complaint.contactInfo;
+  descriptionInput.value = complaint.description || "";
+
+  formHeading.textContent = "Edit Complaint";
+  submitBtn.textContent = "Save Changes";
+  cancelEditBtn.classList.remove("hidden");
+
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth"
+  });
 }
 
-function resetForm() {
+function resetForm(clearMessage = true) {
   editingId = null;
-  form.reset();
-  formHeading.textContent = 'Submit a Complaint';
-  submitBtn.textContent = 'Submit Complaint';
-  cancelEditBtn.classList.add('hidden');
+  complaintForm.reset();
+
+  dateInput.value = new Date().toISOString().split("T")[0];
+
+  formHeading.textContent = "Submit a Complaint";
+  submitBtn.textContent = "Submit Complaint";
+  cancelEditBtn.classList.add("hidden");
+
+  if (clearMessage) {
+    hideMessage();
+  }
 }
 
 async function deleteComplaint(id) {
-  const confirmed = confirm('Delete this complaint? This cannot be undone.');
-  if (!confirmed) return;
+  const complaint = allComplaints.find((item) => item.id === id);
+
+  if (!complaint) {
+    return;
+  }
+
+  const confirmed = confirm(
+    `Are you sure you want to delete "${complaint.title}"?`
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
   const result = await window.complaintAPI.deleteComplaint(id);
-  if (result.success) {
-    allComplaints = allComplaints.filter((c) => c.id !== id);
-    updateCounts(result.counts);
-    renderComplaints();
-    if (editingId === id) resetForm();
-  }
-}
 
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-
-  const studentName = studentNameInput.value.trim();
-  const title = titleInput.value.trim();
-  const category = categoryInput.value.trim();
-  const date = dateInput.value;
-  const contactInfo = contactInfoInput.value.trim();
-  const description = descriptionInput.value.trim();
-
-  if (!studentName || !title || !contactInfo) {
-    showStatus('Name, complaint title, and contact info are required.');
+  if (!result.success) {
+    showMessage(result.message || "Could not delete complaint.", "error");
     return;
   }
 
-  if (category && category.toLowerCase() === title.toLowerCase()) {
-    showStatus("Category can't be the same as the complaint title.");
-    return;
-  }
-
-  const payload = { studentName, title, category, date, contactInfo, description };
-
-  const result = editingId
-    ? await window.complaintAPI.updateComplaint({ id: editingId, ...payload })
-    : await window.complaintAPI.addComplaint(payload);
-
-  if (result.success) {
-    if (editingId) {
-      const idx = allComplaints.findIndex((c) => c.id === editingId);
-      if (idx !== -1) allComplaints[idx] = result.complaint;
-    } else {
-      allComplaints.push(result.complaint);
-    }
-    updateCounts(result.counts);
-    renderComplaints();
-    showStatus(editingId ? 'Complaint updated.' : 'Complaint submitted.', false);
+  if (editingId === id) {
     resetForm();
-  } else {
-    showStatus(result.error || 'Something went wrong.');
   }
-});
 
-cancelEditBtn.addEventListener('click', resetForm);
-searchInput.addEventListener('input', renderComplaints);
-filterInput.addEventListener('change', renderComplaints);
-
-async function init() {
-  const { complaints, counts } = await window.complaintAPI.getComplaints();
-  allComplaints = complaints;
-  updateCounts(counts);
-  renderComplaints();
+  await loadComplaints();
+  showMessage("Complaint deleted successfully.", "success");
 }
 
-init();
+function updateCounts(counts) {
+  pendingCount.textContent = counts.pendingCount;
+  inProgressCount.textContent = counts.inProgressCount;
+  resolvedCount.textContent = counts.resolvedCount;
+}
+
+function formatStatus(status) {
+  const labels = {
+    pending: "Pending",
+    "in-progress": "In Progress",
+    resolved: "Resolved"
+  };
+
+  return labels[status] || status;
+}
+
+function formatDate(dateString) {
+  if (!dateString) {
+    return "No date";
+  }
+
+  const date = new Date(`${dateString}T00:00:00`);
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  }).format(date);
+}
+
+function showMessage(message, type) {
+  formMessage.textContent = message;
+  formMessage.className = `message ${type}`;
+}
+
+function hideMessage() {
+  formMessage.textContent = "";
+  formMessage.className = "message hidden";
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
