@@ -1,3 +1,5 @@
+const STORAGE_KEY = "studentComplaintManagementSystem";
+
 const complaintForm = document.getElementById("complaintForm");
 const studentNameInput = document.getElementById("studentName");
 const titleInput = document.getElementById("title");
@@ -31,24 +33,32 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 complaintForm.addEventListener("submit", handleFormSubmit);
-cancelEditBtn.addEventListener("click", resetForm);
+cancelEditBtn.addEventListener("click", () => resetForm());
 searchInput.addEventListener("input", renderComplaints);
 filterInput.addEventListener("change", renderComplaints);
 
-async function loadComplaints() {
-  const result = await window.complaintAPI.getComplaints();
+function loadComplaints() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    allComplaints = saved ? JSON.parse(saved) : [];
 
-  if (!result.success) {
-    showMessage("Could not load complaints.", "error");
-    return;
+    if (!Array.isArray(allComplaints)) {
+      allComplaints = [];
+    }
+  } catch (error) {
+    console.error("Could not load complaints:", error);
+    allComplaints = [];
   }
 
-  allComplaints = result.complaints;
-  updateCounts(result.counts);
+  updateCounts();
   renderComplaints();
 }
 
-async function handleFormSubmit(event) {
+function saveComplaints() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(allComplaints));
+}
+
+function handleFormSubmit(event) {
   event.preventDefault();
 
   const studentName = studentNameInput.value.trim();
@@ -58,7 +68,7 @@ async function handleFormSubmit(event) {
   const contactInfo = contactInput.value.trim();
   const description = descriptionInput.value.trim();
 
-  if (!studentName || !title || !contactInfo || !date || !category) {
+  if (!studentName || !title || !category || !date || !contactInfo) {
     showMessage("Please fill in all required fields.", "error");
     return;
   }
@@ -77,29 +87,31 @@ async function handleFormSubmit(event) {
     description
   };
 
-  let result;
-
   if (editingId) {
-    result = await window.complaintAPI.updateComplaint({
-      id: editingId,
-      ...payload
-    });
-  } else {
-    result = await window.complaintAPI.addComplaint(payload);
-  }
+    const index = allComplaints.findIndex((item) => item.id === editingId);
 
-  if (!result.success) {
-    showMessage(result.message || "Something went wrong.", "error");
-    return;
-  }
+    if (index !== -1) {
+      allComplaints[index] = {
+        ...allComplaints[index],
+        ...payload
+      };
+    }
 
-  if (editingId) {
     showMessage("Complaint updated successfully.", "success");
   } else {
+    allComplaints.push({
+      id: Date.now().toString(),
+      ...payload,
+      status: "pending",
+      createdAt: Date.now()
+    });
+
     showMessage("Complaint submitted successfully.", "success");
   }
 
-  await loadComplaints();
+  saveComplaints();
+  updateCounts();
+  renderComplaints();
   resetForm(false);
 }
 
@@ -122,13 +134,14 @@ function renderComplaints() {
   }
 
   filtered.sort((a, b) => b.createdAt - a.createdAt);
-
   complaintList.innerHTML = "";
 
   if (filtered.length === 0) {
     emptyState.classList.remove("hidden");
+
     emptyState.querySelector("h3").textContent =
       allComplaints.length === 0 ? "No complaints yet" : "No matching complaints";
+
     emptyState.querySelector("p").textContent =
       allComplaints.length === 0
         ? "Submit a complaint above to get started."
@@ -149,15 +162,14 @@ function createComplaintCard(complaint) {
   const card = document.createElement("article");
   card.className = "complaint-card";
 
-  const statusLabel = formatStatus(complaint.status);
-  const statusClass = complaint.status;
-
   card.innerHTML = `
     <div class="complaint-top">
       <div>
         <div class="title-row">
           <h3>${escapeHtml(complaint.title)}</h3>
-          <span class="status-badge ${statusClass}">${statusLabel}</span>
+          <span class="status-badge ${complaint.status}">
+            ${formatStatus(complaint.status)}
+          </span>
         </div>
 
         <p class="student-name">
@@ -180,25 +192,14 @@ function createComplaintCard(complaint) {
     }
 
     <div class="complaint-actions">
-      <select class="status-select" data-id="${complaint.id}">
-        <option value="pending" ${complaint.status === "pending" ? "selected" : ""}>
-          Pending
-        </option>
-        <option value="in-progress" ${complaint.status === "in-progress" ? "selected" : ""}>
-          In Progress
-        </option>
-        <option value="resolved" ${complaint.status === "resolved" ? "selected" : ""}>
-          Resolved
-        </option>
+      <select class="status-select">
+        <option value="pending">Pending</option>
+        <option value="in-progress">In Progress</option>
+        <option value="resolved">Resolved</option>
       </select>
 
-      <button class="btn btn-secondary edit-btn" data-id="${complaint.id}">
-        Edit
-      </button>
-
-      <button class="btn btn-danger delete-btn" data-id="${complaint.id}">
-        Delete
-      </button>
+      <button class="btn btn-secondary edit-btn">Edit</button>
+      <button class="btn btn-danger delete-btn">Delete</button>
     </div>
   `;
 
@@ -206,33 +207,34 @@ function createComplaintCard(complaint) {
   const editButton = card.querySelector(".edit-btn");
   const deleteButton = card.querySelector(".delete-btn");
 
-  statusSelect.addEventListener("change", async (event) => {
-    const result = await window.complaintAPI.setStatus(
-      complaint.id,
-      event.target.value
-    );
+  statusSelect.value = complaint.status;
 
-    if (result.success) {
-      await loadComplaints();
-      showMessage("Complaint status updated.", "success");
-    } else {
-      showMessage(result.message || "Could not update status.", "error");
-    }
+  statusSelect.addEventListener("change", (event) => {
+    changeStatus(complaint.id, event.target.value);
   });
 
   editButton.addEventListener("click", () => startEdit(complaint.id));
-
   deleteButton.addEventListener("click", () => deleteComplaint(complaint.id));
 
   return card;
 }
 
+function changeStatus(id, status) {
+  const complaint = allComplaints.find((item) => item.id === id);
+
+  if (!complaint) return;
+
+  complaint.status = status;
+  saveComplaints();
+  updateCounts();
+  renderComplaints();
+  showMessage("Complaint status updated.", "success");
+}
+
 function startEdit(id) {
   const complaint = allComplaints.find((item) => item.id === id);
 
-  if (!complaint) {
-    return;
-  }
+  if (!complaint) return;
 
   editingId = id;
 
@@ -268,56 +270,50 @@ function resetForm(clearMessage = true) {
   }
 }
 
-async function deleteComplaint(id) {
+function deleteComplaint(id) {
   const complaint = allComplaints.find((item) => item.id === id);
 
-  if (!complaint) {
-    return;
-  }
+  if (!complaint) return;
 
   const confirmed = confirm(
     `Are you sure you want to delete "${complaint.title}"?`
   );
 
-  if (!confirmed) {
-    return;
-  }
+  if (!confirmed) return;
 
-  const result = await window.complaintAPI.deleteComplaint(id);
-
-  if (!result.success) {
-    showMessage(result.message || "Could not delete complaint.", "error");
-    return;
-  }
+  allComplaints = allComplaints.filter((item) => item.id !== id);
 
   if (editingId === id) {
     resetForm();
   }
 
-  await loadComplaints();
+  saveComplaints();
+  updateCounts();
+  renderComplaints();
   showMessage("Complaint deleted successfully.", "success");
 }
 
-function updateCounts(counts) {
-  pendingCount.textContent = counts.pendingCount;
-  inProgressCount.textContent = counts.inProgressCount;
-  resolvedCount.textContent = counts.resolvedCount;
+function updateCounts() {
+  pendingCount.textContent =
+    allComplaints.filter((c) => c.status === "pending").length;
+
+  inProgressCount.textContent =
+    allComplaints.filter((c) => c.status === "in-progress").length;
+
+  resolvedCount.textContent =
+    allComplaints.filter((c) => c.status === "resolved").length;
 }
 
 function formatStatus(status) {
-  const labels = {
+  return {
     pending: "Pending",
     "in-progress": "In Progress",
     resolved: "Resolved"
-  };
-
-  return labels[status] || status;
+  }[status] || status;
 }
 
 function formatDate(dateString) {
-  if (!dateString) {
-    return "No date";
-  }
+  if (!dateString) return "No date";
 
   const date = new Date(`${dateString}T00:00:00`);
 

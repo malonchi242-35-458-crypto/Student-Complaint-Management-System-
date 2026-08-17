@@ -1,37 +1,24 @@
-# Student Complaint Management System
+# Student Complaint Management System — Live Server Version
 
-A desktop Student Complaint Management System built with ElectronJS.
+This version runs directly in a browser with VS Code Live Server.
 
-## Project files
+## Run
 
-- `main.js` — Electron Main process, IPC handlers, and file persistence.
-- `preload.js` — secure `contextBridge` API.
-- `index.html` — application interface.
-- `renderer.js` — form handling, validation, search, filtering, CRUD actions, and rendering.
-- `style.css` — UI design and responsive layout.
-- `package.json` — Electron project configuration.
-- `complaints.json` — optional sample data file for reference. The application stores live data in Electron's user-data folder.
+1. Open this folder in VS Code.
+2. Install the VS Code **Live Server** extension if it is not already installed.
+3. Right-click `index.html`.
+4. Select **Open with Live Server**.
+5. The application will open at an address similar to `127.0.0.1:5500`.
 
-## Run in VS Code
+## No npm required
 
-VS Code is the editor. Electron itself still needs Node.js/npm to install and run.
+This version does NOT use:
+- Node.js
+- npm
+- Electron
+- `main.js`
+- `preload.js`
 
-1. Open this folder in Visual Studio Code.
-2. Open **Terminal → New Terminal**.
-3. Run:
+Complaint data is saved in the browser's `localStorage`, so Submit, Edit, Delete, Status, Search, and Filter work directly in Live Server.
 
-```bash
-npm install
-```
-
-4. Then run:
-
-```bash
-npm start
-```
-
-## GitHub
-
-Do not upload `node_modules`.
-
-A `.gitignore` file is included for this purpose.
+To clear all saved complaints, open the browser developer tools and clear the site's local storage.
